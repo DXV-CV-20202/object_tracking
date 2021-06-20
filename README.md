@@ -19,6 +19,6 @@ Install the required Python modules in file `requirements.txt`:
 ```
 
 Arguments:
-* ```-i, --ip```: Default to ```localhost```
-* ```-o, --port```: Default to ```5000```
-* ```-f, --frame-count```: Default to ```32```
+* ```-i, --ip```: Defaults to ```localhost```
+* ```-o, --port```: Defaults to ```5000```
+* ```-f, --frame-count```: Defaults to ```32```
