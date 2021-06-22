@@ -1,16 +1,14 @@
 # import the necessary packages
-from tracker import SingleMotionDetector
-from imutils.video import VideoStream
 from flask import Response
 from flask import Flask
 from flask import render_template
 import threading
 import argparse
-import datetime
-import imutils
 import time
 import cv2
-
+from object_tracking import MotionDetector
+import datetime
+import imutils
 
 original_frame = None
 keyed_frame = None
@@ -19,7 +17,6 @@ tracked_frame = None
 lock = threading.Lock()
 app = Flask(__name__)
 
-vs = VideoStream().start()
 time.sleep(2.0)
 
 @app.route("/")
@@ -27,47 +24,33 @@ def index():
     return render_template("index.html")
 
 
-def track_object(frame_count):
+def track_object():
     global vs, original_frame, keyed_frame, tracked_frame
 
     # Basically, you just need to assign the processed value to the variables
     # original_frame, keyed_frame and tracked_frame for this to work
 
-    md = SingleMotionDetector(accumWeight=0.1)
-    total = 0
+    md = MotionDetector()
     while True:
-        frame = vs.read()
+        ret, frame = vs.read()
         original_frame = frame.copy()
-        keyed_frame = frame.copy()
 
-        frame = imutils.resize(frame, width=400)
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        gray = cv2.GaussianBlur(gray, (7, 7), 0)
-
-        timestamp = datetime.datetime.now()
-        cv2.putText(frame, timestamp.strftime(
-            "%A %d %B %Y %I:%M:%S%p"), (10, frame.shape[0] - 10),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 255), 1)
-        # if the total number of frames has reached a sufficient
-        # number to construct a reasonable background model, then
-        # continue to process the frame
-        if total > frame_count:
-            # detect motion in the image
-            motion = md.detect(gray)
-            # check to see if motion was found in the frame
-            if motion is not None:
-                # unpack the tuple and draw the box surrounding the
-                # "motion area" on the output frame
-                (thresh, (minX, minY, maxX, maxY)) = motion
-                cv2.rectangle(frame, (minX, minY), (maxX, maxY),
-                    (0, 0, 255), 2)
+        thresh, moving_objects = md.analyse(frame)
+        keyed_frame = thresh
+        for obj in moving_objects:
+            if obj.unseen_time > 0:
+                continue
+            xLeft, yTop, xRight, yBottom = [int(c) for c in obj.bbox]
+            cv2.rectangle(frame, (xLeft, yTop), (xRight, yBottom), obj.color, 2)
+            cv2.rectangle(frame, (xLeft, yTop), (xRight, yTop + 20), obj.color, -1)
+            cv2.putText(frame, str(obj._id), (xLeft, yTop + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.8 , (0,0,0), thickness=2)
         
-        # update the background model and increment the total number
-        # of frames read thus far
-        md.update(gray)
-        total += 1
+        cv2.rectangle(frame, (10, 2), (100,20), (255,255,255), -1)
+        cv2.putText(frame, str(vs.get(cv2.CAP_PROP_POS_FRAMES)), (15, 15),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5 , (0,0,0))
 
         tracked_frame = frame.copy()
+
 
 
 def generate_frame(frame_type):
@@ -107,16 +90,18 @@ if __name__ == '__main__':
         help="ip address of the device")
     ap.add_argument("-o", "--port", type=int, default=5000,
         help="ephemeral port number of the server (1024 to 65535)")
-    ap.add_argument("-f", "--frame-count", type=int, default=32,
-        help="# of frames used to construct the background model")
+    ap.add_argument('--input', type=str, help='Path to a video or a sequence of image.', default='videos/bolt-multi-size-detection.mp4')
+    ap.add_argument('--algo', type=str, help='Background subtraction method (KNN, MOG2).', default='MOG2')
     args = vars(ap.parse_args())
-    # start a thread that will perform motion detection
-    t = threading.Thread(target=track_object, args=(
-        args["frame_count"],))
+
+    vs = cv2.VideoCapture(cv2.samples.findFileOrKeep(args["input"]))
+    t = threading.Thread(target=track_object)
     t.daemon = True
     t.start()
+    if not vs.isOpened():
+        print('Unable to open: ' + args["input"])
+        exit(0)
+
     # start the flask app
     app.run(host=args["ip"], port=args["port"], debug=True,
         threaded=True, use_reloader=False)
-# release the video stream pointer
-vs.stop()
